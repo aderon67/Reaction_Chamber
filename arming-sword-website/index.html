@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Arming Sword Graveyard</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:linear-gradient(#1b2340,#4a3b5c 70%,#6b5a63);font-family:system-ui,sans-serif;color:#f3e9d2;cursor:none}
+#ui{position:fixed;left:0;right:0;top:0;text-align:center;padding:18px;user-select:none}
+h1{margin:0 0 6px;font-size:34px}input{padding:8px 12px;border-radius:6px;border:1px solid #888;width:260px;cursor:text}
+canvas{position:fixed;inset:0;pointer-events:none}
+#hp{position:fixed;left:14px;bottom:14px;font-size:13px;z-index:3;text-shadow:0 1px 2px #000}
+</style></head><body>
+<div id="ui"><h1>Arming Sword Graveyard</h1><p>Swing fast to cut. Drag the rocks. Break the tombstone&hellip;</p><input placeholder="textbox (not cuttable)"></div>
+<canvas id="c"></canvas><div id="hp"></div>
+<script>
+const cv=document.getElementById('c'),c=cv.getContext('2d'),hpEl=document.getElementById('hp');
+let W,H,G;const rnd=(a,b)=>a+Math.random()*(b-a);
+function size(){W=cv.width=innerWidth;H=cv.height=innerHeight;G=H-70}size();addEventListener('resize',size);
+// ---------- state ----------
+let mx=W/2,my=G-100,px=mx,py=my,sa=-0.3,sv=0,down=false,drag=null,swordHp=100,hurt=0,shakeT=0,last=performance.now();
+const objs=[],bits=[],holes=[],blades=[];
+const sword={L:130};
+function pumpkin(x){objs.push({t:'pumpkin',x,y:G-22,r:26,hp:22,vx:0,vy:0})}
+function rock(x,r,vx){objs.push({t:'rock',x,y:G-r*.6,r,hp:r*1.6,vx:vx||0,vy:0,drag:true})}
+function tomb(x){objs.push({t:'tomb',x,y:G-45,r:48,hp:70,vx:0,vy:0})}
+function init(){objs.length=0;blades.length=0;
+ rock(60,52);rock(W-70,58);rock(130,26);rock(W-150,30);   // stones in the corners
+ tomb(W*.5);pumpkin(W*.28);pumpkin(W*.36);pumpkin(W*.68);pumpkin(W*.76);
+ for(let x=0;x<W;x+=11)blades.push({x:x+rnd(-3,3),h:rnd(34,62),ph:rnd(0,6),cut:0,fall:null});}
+init();
+// ---------- input ----------
+addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY});
+addEventListener('mousedown',e=>{down=true;const r=objs.find(o=>o.drag&&Math.hypot(o.x-e.clientX,o.y-e.clientY)<o.r);if(r)drag=r});
+addEventListener('mouseup',()=>{down=false;drag=null});
+addEventListener('touchmove',e=>{mx=e.touches[0].clientX;my=e.touches[0].clientY},{passive:true});
+// ---------- drawing ----------
+function drawObj(o){c.save();
+ if(o.t==='pumpkin'){c.fillStyle='#e8731a';for(let i=-2;i<=2;i++){c.beginPath();c.ellipse(i*9,0,o.r*.5,o.r*.85,0,0,7);c.fill();c.strokeStyle='#a9460a';c.stroke()}
+  c.fillStyle='#3d6b21';c.fillRect(-3,-o.r*.95,7,10)}
+ else if(o.t==='rock'){c.fillStyle='#7d7f86';c.strokeStyle='#4d4f55';c.lineWidth=2;c.beginPath();for(let i=0;i<8;i++){const a=i/8*6.283,rr=o.r*(.85+.15*Math.sin(i*2.7+o.r));c.lineTo(Math.cos(a)*rr,Math.sin(a)*rr*.8)}c.closePath();c.fill();c.stroke();c.fillStyle='#9a9ca4';c.beginPath();c.arc(-o.r*.25,-o.r*.25,o.r*.25,0,7);c.fill()}
+ else if(o.t==='tomb'){c.fillStyle='#8b8f98';c.strokeStyle='#4d5058';c.lineWidth=3;c.beginPath();c.moveTo(-34,45);c.lineTo(-34,-14);c.arc(0,-14,34,Math.PI,0);c.lineTo(34,45);c.closePath();c.fill();c.stroke();c.fillStyle='#555a63';c.fillRect(-4,-30,8,36);c.fillRect(-14,-20,28,7)}
+ else if(o.t==='zombie'){const z=o,rise=Math.min(1,z.age/1.6),f=z.dir;c.scale(f,1);
+  c.fillStyle='#5f8a4a';c.strokeStyle='#2c4222';c.lineWidth=2;
+  c.beginPath();c.ellipse(0,18-rise*0,38,13,0,0,7);c.fill();c.stroke();                       // torso lying forward
+  c.beginPath();c.arc(36,10+Math.sin(z.age*6)*2,15,0,7);c.fill();c.stroke();                   // head
+  c.fillStyle='#e8f26a';c.fillRect(40,6,4,4);
+  const sw=Math.sin(z.age*7)*8;c.lineWidth=7;c.strokeStyle='#5f8a4a';c.lineCap='round';
+  c.beginPath();c.moveTo(18,16);c.lineTo(56+sw,10);c.moveTo(10,20);c.lineTo(48-sw,22);c.stroke(); // reaching arms
+  c.fillStyle='#3d5a2c';c.fillRect(-34,22+Math.sin(z.age*7)*3,18,7)}
+ c.restore()}
+function clipHalf(o,a,side){c.beginPath();const R=200,nx=-Math.sin(a),ny=Math.cos(a);c.moveTo(-nx*R,-ny*R);c.lineTo(nx*R,ny*R);c.lineTo(nx*R+side*ny*R*-1*-1,ny*R+side*-nx*R);c.lineTo(-nx*R+side*ny*R,-ny*R-side*nx*R);c.closePath()}
+// ---------- cutting ----------
+function split(o,a){bits.push({o,a,side:1,x:o.x,y:o.y,vx:o.vx+Math.cos(a+1.57)*130,vy:-120,rot:0,vr:rnd(.5,2),life:1.6},{o,a,side:-1,x:o.x,y:o.y,vx:o.vx-Math.cos(a+1.57)*130,vy:-120,rot:0,vr:rnd(-2,-.5),life:1.6});
+ for(let i=0;i<8;i++)bits.push({dust:1,x:o.x+rnd(-o.r,o.r),y:o.y+rnd(-o.r,o.r),vx:rnd(-160,160),vy:rnd(-260,0),life:.6,col:o.t==='pumpkin'?'#f0902a':o.t==='zombie'?'#7ab35e':'#aaa'})}
+function kill(o,a){objs.splice(objs.indexOf(o),1);split(o,a);
+ if(o.t==='rock'&&o.r>16){rock(o.x-o.r*.4,o.r*.62,-60);rock(o.x+o.r*.4,o.r*.62,60)}
+ if(o.t==='tomb')spawnZombie(o.x)}
+function hit(o,d,a){o.hp-=d;o.flash=.12;if(o.hp<=0)kill(o,a)}
+function spawnZombie(x){holes.push({x,t:0});setTimeout(()=>{objs.push({t:'zombie',x,y:G-8,r:42,hp:55,age:0,dir:1,vx:0,vy:0,atk:0,spawn:1});},500)}
+// ---------- loop ----------
+function bladePts(n){const pts=[];for(let i=1;i<=n;i++){const d=sword.L*i/n;pts.push([px+Math.cos(sa)*d,py+Math.sin(sa)*d])}return pts}
+function step(now){const dt=Math.min(.033,(now-last)/1000);last=now;
+ const vx=(mx-px)/dt,vy=(my-py)/dt,sp=Math.hypot(vx,vy);px=mx;py=my;
+ sv+=((-Math.PI/2-vx*.0016)-sa)*40*dt;sa+=sv*dt;sv*=.86;           // sword hangs from the cursor and swings with its motion
+ sa=Math.max(-2.9,Math.min(-.25,sa));
+ const prev=window._pb||bladePts(6),now_=bladePts(6);window._pb=now_;
+ if(sp>420){const dmg=Math.min(60,sp/22),ang=Math.atan2(vy,vx);
+  for(const o of objs.slice()){if(o.t==='zombie'&&o.age<1.4)continue;
+   if(o.cd>0)continue;
+   for(let i=0;i<6;i++){if(Math.hypot(now_[i][0]-o.x,now_[i][1]-o.y)<o.r+6){hit(o,dmg,ang);o.cd=.25;break}}}
+  for(const b of blades){if(b.cut)continue;for(const p of now_){if(Math.abs(p[0]-b.x)<7&&p[1]>G-b.h){b.cut=6;b.fall={x:b.x,y:G-b.h,vx:rnd(-60,60),vy:-80,r:0};break}}}}
+ // physics
+ for(const o of objs){if(o.cd>0)o.cd-=dt;if(o.flash>0)o.flash-=dt;
+  if(o===drag){o.vx=(mx-o.x)/dt*.4;o.vy=(my-o.y)/dt*.4;o.x=mx;o.y=Math.min(my,G-o.r*.6);continue}
+  if(o.t==='zombie'){o.age+=dt;if(o.age>1.3){const tx=px,dx=tx-o.x;o.dir=dx>=0?1:-1;
+    if(Math.abs(dx)>70)o.x+=o.dir*55*dt;
+    const tip=now_[5];o.atk-=dt;
+    if(Math.hypot(tip[0]-o.x,tip[1]-o.y)<110&&o.atk<=0){o.atk=1;swordHp-=12;hurt=.3;shakeT=.25;o.x+=o.dir*18;
+      for(let i=0;i<5;i++)bits.push({dust:1,x:tip[0],y:tip[1],vx:rnd(-150,150),vy:rnd(-200,0),life:.4,col:'#e33'});
+      if(swordHp<=0){swordHp=100;toast('Your sword was knocked loose - it re-forged!')}}}
+   continue}
+  o.vy+=1600*dt;o.x+=o.vx*dt;o.y+=o.vy*dt;o.vx*=.985;
+  const gy=G-(o.t==='rock'?o.r*.6:o.t==='tomb'?45:22);if(o.y>gy){o.y=gy;o.vy*=-.2;o.vx*=.9}
+  o.x=Math.max(o.r,Math.min(W-o.r,o.x));
+  if(o.t==='rock'&&Math.hypot(o.vx,o.vy)>260)for(const q of objs)if(q!==o&&q.t!=='rock'&&!(q.t==='zombie'&&q.age<1.4)&&Math.hypot(q.x-o.x,q.y-o.y)<q.r+o.r*.8&&!(q.rc>0)){q.rc=.4;q.vx+=Math.sign(o.vx)*80;hit(q,6,0)}   // low-damage rock hits
+  if(o.rc>0)o.rc-=dt}
+ for(const b of bits){if(b.dust){b.vy+=900*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;continue}b.vy+=1500*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.rot+=b.vr*dt;b.life-=dt;if(b.y>G){b.y=G;b.vy=0;b.vx*=.8}}
+ for(let i=bits.length-1;i>=0;i--)if(bits[i].life<=0)bits.splice(i,1);
+ for(const b of blades){if(b.cut>0){b.cut-=dt;if(b.cut<=0){b.cut=0;b.fall=null}}if(b.fall){b.fall.vy+=900*dt;b.fall.x+=b.fall.vx*dt;b.fall.y+=b.fall.vy*dt;b.fall.r+=dt*4;if(b.fall.y>G)b.fall=null}}
+ for(const h of holes)h.t+=dt;
+ hurt=Math.max(0,hurt-dt);shakeT=Math.max(0,shakeT-dt);
+ draw();hpEl.textContent='Sword durability: '+Math.max(0,Math.round(swordHp));requestAnimationFrame(step)}
+function toast(m){hpEl.textContent=m}
+function draw(){c.clearRect(0,0,W,H);c.save();if(shakeT>0)c.translate(rnd(-4,4),rnd(-4,4));
+ // moon + ground base (not cuttable)
+ c.fillStyle='#f2ecd0';c.beginPath();c.arc(W*.85,110,36,0,7);c.fill();
+ c.fillStyle='#2f5a24';c.fillRect(0,G,W,H-G);c.fillStyle='#244a1c';c.fillRect(0,G+30,W,H);
+ // holes
+ for(const h of holes){const k=Math.min(1,h.t/.5),fade=Math.max(0,1-(h.t-6)/3);if(fade<=0)continue;c.globalAlpha=fade;c.fillStyle='#120b07';c.beginPath();c.ellipse(h.x,G+6,60*k,12*k,0,0,7);c.fill();c.strokeStyle='#4a3320';c.lineWidth=4;c.stroke();c.globalAlpha=1}
+ // long grass (cuttable)
+ c.lineCap='round';for(const b of blades){if(b.cut)continue;const sw=Math.sin(performance.now()/700+b.ph)*5;c.strokeStyle='#3f8a2e';c.lineWidth=3;c.beginPath();c.moveTo(b.x,G+4);c.quadraticCurveTo(b.x+sw*.4,G-b.h*.5,b.x+sw,G-b.h);c.stroke()}
+ for(const b of blades)if(b.fall){c.strokeStyle='#4aa035';c.lineWidth=3;c.beginPath();c.moveTo(b.fall.x,b.fall.y);c.lineTo(b.fall.x+Math.cos(b.fall.r)*12,b.fall.y+Math.sin(b.fall.r)*12);c.stroke()}
+ // objects
+ for(const o of objs){c.save();c.translate(o.x,o.y);if(o.t==='zombie'&&o.age<1.6){const rise=o.age/1.6;c.beginPath();c.rect(-120,-120,240,120+(G-o.y)+10);c.clip();c.translate(0,(1-rise)*50)}
+  if(o.flash>0)c.filter='brightness(2)';drawObj(o);c.restore()}
+ for(const b of bits){if(b.dust){c.globalAlpha=Math.max(0,b.life*1.5);c.fillStyle=b.col;c.fillRect(b.x,b.y,4,4);c.globalAlpha=1;continue}
+  c.save();c.translate(b.x,b.y);c.rotate(b.rot);c.beginPath();const R=140,nx=-Math.sin(b.a),ny=Math.cos(b.a);
+  c.moveTo(0,0);c.lineTo(Math.cos(b.a)*R,Math.sin(b.a)*R);c.lineTo(Math.cos(b.a)*R+b.side*nx*R,Math.sin(b.a)*R+b.side*ny*R);c.lineTo(b.side*nx*R,b.side*ny*R);c.lineTo(-Math.cos(b.a)*R+b.side*nx*R,-Math.sin(b.a)*R+b.side*ny*R);c.lineTo(-Math.cos(b.a)*R,-Math.sin(b.a)*R);c.closePath();c.clip();
+  c.globalAlpha=Math.min(1,b.life);drawObj(Object.assign({},b.o,{x:0,y:0,age:3,dir:1}));c.restore()}
+ // arming sword
+ c.save();c.translate(px,py);c.rotate(sa);
+ c.fillStyle='#5a3a1e';c.fillRect(-26,-4,26,8);c.fillStyle='#d2a63c';c.beginPath();c.arc(-30,0,6,0,7);c.fill();
+ c.fillStyle='#d2a63c';c.fillRect(-2,-17,8,34);
+ const g=c.createLinearGradient(0,-8,0,8);g.addColorStop(0,'#f4f7fa');g.addColorStop(.5,'#b8c2cc');g.addColorStop(1,'#8d98a3');c.fillStyle=g;
+ c.beginPath();c.moveTo(6,-7);c.lineTo(sword.L-22,-6);c.lineTo(sword.L,0);c.lineTo(sword.L-22,6);c.lineTo(6,7);c.closePath();c.fill();c.strokeStyle='#59636d';c.lineWidth=1.5;c.stroke();
+ c.strokeStyle='#7d8893';c.beginPath();c.moveTo(10,0);c.lineTo(sword.L-30,0);c.stroke();
+ if(hurt>0){c.globalCompositeOperation='source-atop';c.fillStyle='rgba(255,0,0,.4)';c.fillRect(-40,-20,sword.L+50,40)}
+ c.restore();c.restore()}
+requestAnimationFrame(step);
+</script></body></html>
