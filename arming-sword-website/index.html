@@ -1,118 +1,1045 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Arming Sword Graveyard</title>
+<title>Arming Sword Graveyard 3D - zeid</title>
 <style>
-html,body{margin:0;height:100%;overflow:hidden;background:linear-gradient(#1b2340,#4a3b5c 70%,#6b5a63);font-family:system-ui,sans-serif;color:#f3e9d2;cursor:none}
-#ui{position:fixed;left:0;right:0;top:0;text-align:center;padding:18px;user-select:none}
-h1{margin:0 0 6px;font-size:34px}input{padding:8px 12px;border-radius:6px;border:1px solid #888;width:260px;cursor:text}
-canvas{position:fixed;inset:0;pointer-events:none}
-#hp{position:fixed;left:14px;bottom:14px;font-size:13px;z-index:3;text-shadow:0 1px 2px #000}
-</style></head><body>
-<div id="ui"><h1>Arming Sword Graveyard</h1><p>Swing fast to cut. Drag the rocks. Break the tombstone&hellip;</p><input placeholder="textbox (not cuttable)"></div>
-<canvas id="c"></canvas><div id="hp"></div>
-<script>
-const cv=document.getElementById('c'),c=cv.getContext('2d'),hpEl=document.getElementById('hp');
-let W,H,G;const rnd=(a,b)=>a+Math.random()*(b-a);
-function size(){W=cv.width=innerWidth;H=cv.height=innerHeight;G=H-70}size();addEventListener('resize',size);
-// ---------- state ----------
-let mx=W/2,my=G-100,px=mx,py=my,sa=-0.3,sv=0,down=false,drag=null,swordHp=100,hurt=0,shakeT=0,last=performance.now();
-const objs=[],bits=[],holes=[],blades=[];
-const sword={L:130};
-function pumpkin(x){objs.push({t:'pumpkin',x,y:G-22,r:26,hp:22,vx:0,vy:0})}
-function rock(x,r,vx){objs.push({t:'rock',x,y:G-r*.6,r,hp:r*1.6,vx:vx||0,vy:0,drag:true})}
-function tomb(x){objs.push({t:'tomb',x,y:G-45,r:48,hp:70,vx:0,vy:0})}
-function init(){objs.length=0;blades.length=0;
- rock(60,52);rock(W-70,58);rock(130,26);rock(W-150,30);   // stones in the corners
- tomb(W*.5);pumpkin(W*.28);pumpkin(W*.36);pumpkin(W*.68);pumpkin(W*.76);
- for(let x=0;x<W;x+=11)blades.push({x:x+rnd(-3,3),h:rnd(34,62),ph:rnd(0,6),cut:0,fall:null});}
-init();
-// ---------- input ----------
-addEventListener('mousemove',e=>{mx=e.clientX;my=e.clientY});
-addEventListener('mousedown',e=>{down=true;const r=objs.find(o=>o.drag&&Math.hypot(o.x-e.clientX,o.y-e.clientY)<o.r);if(r)drag=r});
-addEventListener('mouseup',()=>{down=false;drag=null});
-addEventListener('touchmove',e=>{mx=e.touches[0].clientX;my=e.touches[0].clientY},{passive:true});
-// ---------- drawing ----------
-function drawObj(o){c.save();
- if(o.t==='pumpkin'){c.fillStyle='#e8731a';for(let i=-2;i<=2;i++){c.beginPath();c.ellipse(i*9,0,o.r*.5,o.r*.85,0,0,7);c.fill();c.strokeStyle='#a9460a';c.stroke()}
-  c.fillStyle='#3d6b21';c.fillRect(-3,-o.r*.95,7,10)}
- else if(o.t==='rock'){c.fillStyle='#7d7f86';c.strokeStyle='#4d4f55';c.lineWidth=2;c.beginPath();for(let i=0;i<8;i++){const a=i/8*6.283,rr=o.r*(.85+.15*Math.sin(i*2.7+o.r));c.lineTo(Math.cos(a)*rr,Math.sin(a)*rr*.8)}c.closePath();c.fill();c.stroke();c.fillStyle='#9a9ca4';c.beginPath();c.arc(-o.r*.25,-o.r*.25,o.r*.25,0,7);c.fill()}
- else if(o.t==='tomb'){c.fillStyle='#8b8f98';c.strokeStyle='#4d5058';c.lineWidth=3;c.beginPath();c.moveTo(-34,45);c.lineTo(-34,-14);c.arc(0,-14,34,Math.PI,0);c.lineTo(34,45);c.closePath();c.fill();c.stroke();c.fillStyle='#555a63';c.fillRect(-4,-30,8,36);c.fillRect(-14,-20,28,7)}
- else if(o.t==='zombie'){const z=o,rise=Math.min(1,z.age/1.6),f=z.dir;c.scale(f,1);
-  c.fillStyle='#5f8a4a';c.strokeStyle='#2c4222';c.lineWidth=2;
-  c.beginPath();c.ellipse(0,18-rise*0,38,13,0,0,7);c.fill();c.stroke();                       // torso lying forward
-  c.beginPath();c.arc(36,10+Math.sin(z.age*6)*2,15,0,7);c.fill();c.stroke();                   // head
-  c.fillStyle='#e8f26a';c.fillRect(40,6,4,4);
-  const sw=Math.sin(z.age*7)*8;c.lineWidth=7;c.strokeStyle='#5f8a4a';c.lineCap='round';
-  c.beginPath();c.moveTo(18,16);c.lineTo(56+sw,10);c.moveTo(10,20);c.lineTo(48-sw,22);c.stroke(); // reaching arms
-  c.fillStyle='#3d5a2c';c.fillRect(-34,22+Math.sin(z.age*7)*3,18,7)}
- c.restore()}
-function clipHalf(o,a,side){c.beginPath();const R=200,nx=-Math.sin(a),ny=Math.cos(a);c.moveTo(-nx*R,-ny*R);c.lineTo(nx*R,ny*R);c.lineTo(nx*R+side*ny*R*-1*-1,ny*R+side*-nx*R);c.lineTo(-nx*R+side*ny*R,-ny*R-side*nx*R);c.closePath()}
-// ---------- cutting ----------
-function split(o,a){bits.push({o,a,side:1,x:o.x,y:o.y,vx:o.vx+Math.cos(a+1.57)*130,vy:-120,rot:0,vr:rnd(.5,2),life:1.6},{o,a,side:-1,x:o.x,y:o.y,vx:o.vx-Math.cos(a+1.57)*130,vy:-120,rot:0,vr:rnd(-2,-.5),life:1.6});
- for(let i=0;i<8;i++)bits.push({dust:1,x:o.x+rnd(-o.r,o.r),y:o.y+rnd(-o.r,o.r),vx:rnd(-160,160),vy:rnd(-260,0),life:.6,col:o.t==='pumpkin'?'#f0902a':o.t==='zombie'?'#7ab35e':'#aaa'})}
-function kill(o,a){objs.splice(objs.indexOf(o),1);split(o,a);
- if(o.t==='rock'&&o.r>16){rock(o.x-o.r*.4,o.r*.62,-60);rock(o.x+o.r*.4,o.r*.62,60)}
- if(o.t==='tomb')spawnZombie(o.x)}
-function hit(o,d,a){o.hp-=d;o.flash=.12;if(o.hp<=0)kill(o,a)}
-function spawnZombie(x){holes.push({x,t:0});setTimeout(()=>{objs.push({t:'zombie',x,y:G-8,r:42,hp:55,age:0,dir:1,vx:0,vy:0,atk:0,spawn:1});},500)}
-// ---------- loop ----------
-function bladePts(n){const pts=[];for(let i=1;i<=n;i++){const d=sword.L*i/n;pts.push([px+Math.cos(sa)*d,py+Math.sin(sa)*d])}return pts}
-function step(now){const dt=Math.min(.033,(now-last)/1000);last=now;
- const vx=(mx-px)/dt,vy=(my-py)/dt,sp=Math.hypot(vx,vy);px=mx;py=my;
- sv+=((-Math.PI/2-vx*.0016)-sa)*40*dt;sa+=sv*dt;sv*=.86;           // sword hangs from the cursor and swings with its motion
- sa=Math.max(-2.9,Math.min(-.25,sa));
- const prev=window._pb||bladePts(6),now_=bladePts(6);window._pb=now_;
- if(sp>420){const dmg=Math.min(60,sp/22),ang=Math.atan2(vy,vx);
-  for(const o of objs.slice()){if(o.t==='zombie'&&o.age<1.4)continue;
-   if(o.cd>0)continue;
-   for(let i=0;i<6;i++){if(Math.hypot(now_[i][0]-o.x,now_[i][1]-o.y)<o.r+6){hit(o,dmg,ang);o.cd=.25;break}}}
-  for(const b of blades){if(b.cut)continue;for(const p of now_){if(Math.abs(p[0]-b.x)<7&&p[1]>G-b.h){b.cut=6;b.fall={x:b.x,y:G-b.h,vx:rnd(-60,60),vy:-80,r:0};break}}}}
- // physics
- for(const o of objs){if(o.cd>0)o.cd-=dt;if(o.flash>0)o.flash-=dt;
-  if(o===drag){o.vx=(mx-o.x)/dt*.4;o.vy=(my-o.y)/dt*.4;o.x=mx;o.y=Math.min(my,G-o.r*.6);continue}
-  if(o.t==='zombie'){o.age+=dt;if(o.age>1.3){const tx=px,dx=tx-o.x;o.dir=dx>=0?1:-1;
-    if(Math.abs(dx)>70)o.x+=o.dir*55*dt;
-    const tip=now_[5];o.atk-=dt;
-    if(Math.hypot(tip[0]-o.x,tip[1]-o.y)<110&&o.atk<=0){o.atk=1;swordHp-=12;hurt=.3;shakeT=.25;o.x+=o.dir*18;
-      for(let i=0;i<5;i++)bits.push({dust:1,x:tip[0],y:tip[1],vx:rnd(-150,150),vy:rnd(-200,0),life:.4,col:'#e33'});
-      if(swordHp<=0){swordHp=100;toast('Your sword was knocked loose - it re-forged!')}}}
-   continue}
-  o.vy+=1600*dt;o.x+=o.vx*dt;o.y+=o.vy*dt;o.vx*=.985;
-  const gy=G-(o.t==='rock'?o.r*.6:o.t==='tomb'?45:22);if(o.y>gy){o.y=gy;o.vy*=-.2;o.vx*=.9}
-  o.x=Math.max(o.r,Math.min(W-o.r,o.x));
-  if(o.t==='rock'&&Math.hypot(o.vx,o.vy)>260)for(const q of objs)if(q!==o&&q.t!=='rock'&&!(q.t==='zombie'&&q.age<1.4)&&Math.hypot(q.x-o.x,q.y-o.y)<q.r+o.r*.8&&!(q.rc>0)){q.rc=.4;q.vx+=Math.sign(o.vx)*80;hit(q,6,0)}   // low-damage rock hits
-  if(o.rc>0)o.rc-=dt}
- for(const b of bits){if(b.dust){b.vy+=900*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.life-=dt;continue}b.vy+=1500*dt;b.x+=b.vx*dt;b.y+=b.vy*dt;b.rot+=b.vr*dt;b.life-=dt;if(b.y>G){b.y=G;b.vy=0;b.vx*=.8}}
- for(let i=bits.length-1;i>=0;i--)if(bits[i].life<=0)bits.splice(i,1);
- for(const b of blades){if(b.cut>0){b.cut-=dt;if(b.cut<=0){b.cut=0;b.fall=null}}if(b.fall){b.fall.vy+=900*dt;b.fall.x+=b.fall.vx*dt;b.fall.y+=b.fall.vy*dt;b.fall.r+=dt*4;if(b.fall.y>G)b.fall=null}}
- for(const h of holes)h.t+=dt;
- hurt=Math.max(0,hurt-dt);shakeT=Math.max(0,shakeT-dt);
- draw();hpEl.textContent='Sword durability: '+Math.max(0,Math.round(swordHp));requestAnimationFrame(step)}
-function toast(m){hpEl.textContent=m}
-function draw(){c.clearRect(0,0,W,H);c.save();if(shakeT>0)c.translate(rnd(-4,4),rnd(-4,4));
- // moon + ground base (not cuttable)
- c.fillStyle='#f2ecd0';c.beginPath();c.arc(W*.85,110,36,0,7);c.fill();
- c.fillStyle='#2f5a24';c.fillRect(0,G,W,H-G);c.fillStyle='#244a1c';c.fillRect(0,G+30,W,H);
- // holes
- for(const h of holes){const k=Math.min(1,h.t/.5),fade=Math.max(0,1-(h.t-6)/3);if(fade<=0)continue;c.globalAlpha=fade;c.fillStyle='#120b07';c.beginPath();c.ellipse(h.x,G+6,60*k,12*k,0,0,7);c.fill();c.strokeStyle='#4a3320';c.lineWidth=4;c.stroke();c.globalAlpha=1}
- // long grass (cuttable)
- c.lineCap='round';for(const b of blades){if(b.cut)continue;const sw=Math.sin(performance.now()/700+b.ph)*5;c.strokeStyle='#3f8a2e';c.lineWidth=3;c.beginPath();c.moveTo(b.x,G+4);c.quadraticCurveTo(b.x+sw*.4,G-b.h*.5,b.x+sw,G-b.h);c.stroke()}
- for(const b of blades)if(b.fall){c.strokeStyle='#4aa035';c.lineWidth=3;c.beginPath();c.moveTo(b.fall.x,b.fall.y);c.lineTo(b.fall.x+Math.cos(b.fall.r)*12,b.fall.y+Math.sin(b.fall.r)*12);c.stroke()}
- // objects
- for(const o of objs){c.save();c.translate(o.x,o.y);if(o.t==='zombie'&&o.age<1.6){const rise=o.age/1.6;c.beginPath();c.rect(-120,-120,240,120+(G-o.y)+10);c.clip();c.translate(0,(1-rise)*50)}
-  if(o.flash>0)c.filter='brightness(2)';drawObj(o);c.restore()}
- for(const b of bits){if(b.dust){c.globalAlpha=Math.max(0,b.life*1.5);c.fillStyle=b.col;c.fillRect(b.x,b.y,4,4);c.globalAlpha=1;continue}
-  c.save();c.translate(b.x,b.y);c.rotate(b.rot);c.beginPath();const R=140,nx=-Math.sin(b.a),ny=Math.cos(b.a);
-  c.moveTo(0,0);c.lineTo(Math.cos(b.a)*R,Math.sin(b.a)*R);c.lineTo(Math.cos(b.a)*R+b.side*nx*R,Math.sin(b.a)*R+b.side*ny*R);c.lineTo(b.side*nx*R,b.side*ny*R);c.lineTo(-Math.cos(b.a)*R+b.side*nx*R,-Math.sin(b.a)*R+b.side*ny*R);c.lineTo(-Math.cos(b.a)*R,-Math.sin(b.a)*R);c.closePath();c.clip();
-  c.globalAlpha=Math.min(1,b.life);drawObj(Object.assign({},b.o,{x:0,y:0,age:3,dir:1}));c.restore()}
- // arming sword
- c.save();c.translate(px,py);c.rotate(sa);
- c.fillStyle='#5a3a1e';c.fillRect(-26,-4,26,8);c.fillStyle='#d2a63c';c.beginPath();c.arc(-30,0,6,0,7);c.fill();
- c.fillStyle='#d2a63c';c.fillRect(-2,-17,8,34);
- const g=c.createLinearGradient(0,-8,0,8);g.addColorStop(0,'#f4f7fa');g.addColorStop(.5,'#b8c2cc');g.addColorStop(1,'#8d98a3');c.fillStyle=g;
- c.beginPath();c.moveTo(6,-7);c.lineTo(sword.L-22,-6);c.lineTo(sword.L,0);c.lineTo(sword.L-22,6);c.lineTo(6,7);c.closePath();c.fill();c.strokeStyle='#59636d';c.lineWidth=1.5;c.stroke();
- c.strokeStyle='#7d8893';c.beginPath();c.moveTo(10,0);c.lineTo(sword.L-30,0);c.stroke();
- if(hurt>0){c.globalCompositeOperation='source-atop';c.fillStyle='rgba(255,0,0,.4)';c.fillRect(-40,-20,sword.L+50,40)}
- c.restore();c.restore()}
-requestAnimationFrame(step);
+html,body{margin:0;height:100%;overflow:hidden;background:#3a1f5c;font-family:Georgia,serif}
+canvas{display:block;cursor:none}
+#gild{position:fixed;left:50%;top:14px;transform:translateX(-50%);width:min(560px,92vw);padding:14px 20px;color:#3b2504;text-align:center;border:5px solid transparent;border-radius:12px;user-select:none;pointer-events:auto;
+background:linear-gradient(#f7e08a,#e2b53c 50%,#f4d46b) padding-box,linear-gradient(135deg,#fff3b0,#b8860b 40%,#ffe58a 60%,#8a6508) border-box;box-shadow:0 0 18px #ffd86a88,inset 0 0 14px #fff8}
+#gild a{display:inline-block;margin-top:8px;padding:6px 14px;border-radius:8px;background:#3b2504;color:#ffe58a;font:700 13px system-ui;text-decoration:none;cursor:pointer}#gild a:hover{background:#5a3a08}#gild p{margin:2px 0;font-size:14px}#gild h2{margin:0 0 6px;font-size:20px}#gild ol{margin:0;padding-left:20px;text-align:left;font-size:13px;line-height:1.35}
+#hud{position:fixed;left:12px;bottom:10px;color:#fff;font:13px system-ui;text-shadow:0 1px 3px #000;pointer-events:none}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script src="assets/gs-data.js"></script>
+</head><body>
+<div id="gild"><h2>&#9876; my name is zeid, i am cool</h2>
+<p>email: 32dejaze</p>
+<ol>
+<li>The arming sword was the one-handed, double-edged sidearm of medieval knights.</li>
+<li>A typical blade was roughly 70&ndash;80&nbsp;cm (28&ndash;32&nbsp;in) long.</li>
+<li>It weighed only about 1&ndash;1.4&nbsp;kg (2&ndash;3&nbsp;lb), lighter than most people expect.</li>
+<li>The wheel-shaped pommel is a counterweight that balances the blade.</li>
+<li>It was usually paired with a shield and used for both cuts and thrusts.</li></ol>
+<a href="downloads/gun-smash-extension.zip" download>&#11015; Download the Gun Smash extension</a></div>
+<div id="hud"></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import * as SU from 'three/addons/utils/SkeletonUtils.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+const R = (a, b) => a + Math.random() * (b - a), hud = document.getElementById('hud');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(4926075);
+scene.fog = new THREE.Fog(4926075, 22, 48);
+const cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+cam.position.set(0, 9, 13);
+cam.lookAt(0, 1, 0);
+addEventListener('resize', () => {
+  cam.aspect = innerWidth / innerHeight;
+  cam.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+scene.add(new THREE.HemisphereLight(13482239, 2833707, 1.1));
+const sun = new THREE.DirectionalLight(16773328, 1.6);
+sun.position.set(6, 12, 8);
+scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 40), new THREE.MeshStandardMaterial({
+  color: 3107388,
+  roughness: 1
+}));
+ground.rotation.x = -Math.PI / 2;
+scene.add(ground);
+const loader = new GLTFLoader(), load = u => new Promise(r => loader.load('assets/' + u, g => r(g.scene), undefined, () => r(null)));
+// ---------- shader outline (inverted hull) on every solid 3D thing ----------
+const hullMat = w => {
+  const m = new THREE.MeshBasicMaterial({
+    color: 1180703,
+    side: THREE.BackSide
+  });
+  m.onBeforeCompile = s => {
+    s.vertexShader = s.vertexShader.replace('#include <begin_vertex>', 'vec3 transformed=vec3(position)+normalize(normal)*' + w.toFixed(4) + ';');
+  };
+  return m;
+};
+function outline(root, k = 0.028) {
+  const add = [];
+  root.traverse(o => {
+    if (!o.isMesh || o.userData.hull || o.material.alphaTest > 0 || o.material.transparent || /Leav|Grass/i.test(o.material.name))
+      return;
+    o.geometry.computeBoundingSphere();
+    const h = o.isSkinnedMesh ? new THREE.SkinnedMesh(o.geometry, hullMat(o.geometry.boundingSphere.radius * k)) : new THREE.Mesh(o.geometry, hullMat(o.geometry.boundingSphere.radius * k));
+    h.userData.hull = 1;
+    if (o.isSkinnedMesh)
+      h.bind(o.skeleton, o.bindMatrix);
+    add.push([
+      o,
+      h
+    ]);
+  });
+  add.forEach(([o, h]) => o.add(h));
+  return root;
+}
+const std = (c, o = {}) => new THREE.MeshStandardMaterial(Object.assign({
+  color: c,
+  roughness: 0.8,
+  flatShading: true
+}, o));
+// ---------- world state ----------
+const ents = [], grass = [], patches = [], projs = [];
+let mouse = new THREE.Vector2(), ptr = new THREE.Vector3(), pPrev = new THREE.Vector3(), height = 1.6, down = false, dragEnt = null, stabCd = 0, dur = 100;
+const ray = new THREE.Raycaster(), gplane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+function updPtr() {
+  ray.setFromCamera(mouse, cam);
+  ray.ray.intersectPlane(gplane, ptr);
+}
+addEventListener('pointermove', e => {
+  mouse.set(e.clientX / innerWidth * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+});
+addEventListener('wheel', e => {
+  height = THREE.MathUtils.clamp(height - e.deltaY * 0.003, 0.4, 6);
+}, { passive: true });
+document.getElementById('gild').addEventListener('pointerdown', e => e.stopPropagation());
+addEventListener('pointerdown', () => {
+  down = true;
+  updPtr();
+  const rk = ents.filter(e => (e.kind === 'rock' || e.kind === 'piece') && e.obj.position.distanceTo(new THREE.Vector3(ptr.x, e.obj.position.y, ptr.z)) < e.r + 0.3)[0];
+  if (rk) {
+    dragEnt = rk;
+  } else
+    stab();
+});
+addEventListener('pointerup', () => {
+  down = false;
+  if (dragEnt) {
+    dragEnt.vx = (ptr.x - pPrev.x) * 8;
+    dragEnt.vz = (ptr.z - pPrev.z) * 8;
+    dragEnt = null;
+  }
+});
+const hole = (x, z) => {
+  const m = new THREE.Mesh(new THREE.CircleGeometry(1.1, 24), new THREE.MeshBasicMaterial({ color: 656643 }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, 0.03, z);
+  m.scale.setScalar(0.01);
+  scene.add(m);
+  patches.push({
+    m,
+    t: 0,
+    hole: 1
+  });
+  return m;
+};
+// ---------- the arming sword (Gun Smash model) ----------
+const sword = new THREE.Group(), swordTilt = new THREE.Group();
+sword.add(swordTilt);
+scene.add(sword);
+{
+  const f = new Float32Array(new Uint8Array(atob(GS.sword.v).split('').map(c => c.charCodeAt(0))).buffer), n = f.length / 8, P = new Float32Array(n * 3), N = new Float32Array(n * 3), U = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    P.set(f.subarray(i * 8, i * 8 + 3), i * 3);
+    N.set(f.subarray(i * 8 + 3, i * 8 + 6), i * 3);
+    U.set(f.subarray(i * 8 + 6, i * 8 + 8), i * 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(U, 2));
+  g.rotateX(-Math.PI / 2);
+  g.translate(0, 6.8, 0);
+  g.scale(0.045, 0.045, 0.045);
+  const t = new THREE.TextureLoader().load(GS.sword.tex);
+  t.flipY = false;
+  t.magFilter = t.minFilter = THREE.NearestFilter;
+  t.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+    map: t,
+    metalness: 0.5,
+    roughness: 0.35
+  }));
+  swordTilt.add(m);
+  outline(swordTilt, 0.012);
+  m.position.y = 0;
+}
+// ---------- the Gun Smash zombie (skinned) ----------
+let zTex;
+const zData = GS.zombie;
+function buildZombie() {
+  zTex = zTex || (() => {
+    const t = new THREE.TextureLoader().load(GS.ztex);
+    t.flipY = false;
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  })();
+  const u8 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0)), B = zData.bones.map(b => {
+      const o = new THREE.Bone();
+      o.name = b[0];
+      return o;
+    }), W = zData.bones.map(b => new THREE.Vector3(b[2], b[3], b[4])), grp = new THREE.Group();
+  zData.bones.forEach((b, i) => {
+    if (b[1] < 0) {
+      B[i].position.copy(W[i]);
+      grp.add(B[i]);
+    } else {
+      B[b[1]].add(B[i]);
+      B[i].position.copy(W[i]).sub(W[b[1]]);
+    }
+  });
+  grp.updateMatrixWorld(true);
+  const sk = new THREE.Skeleton(B);
+  for (const k in zData.groups) {
+    const g = zData.groups[k], vb = u8(g.v), dv = new DataView(vb.buffer), nv = g.nv, P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), U = new Float32Array(nv * 2), SI = new Uint16Array(nv * 4), SW = new Float32Array(nv * 4);
+    for (let i = 0, o = 0; i < nv; i++, o += 22) {
+      for (let j = 0; j < 3; j++) {
+        P[i * 3 + j] = dv.getInt16(o + j * 2, true) / 14000;
+        N[i * 3 + j] = dv.getInt8(o + 6 + j) / 127;
+      }
+      U[i * 2] = dv.getUint16(o + 10, true) / 65535;
+      U[i * 2 + 1] = 1 - dv.getUint16(o + 12, true) / 65535;
+      for (let j = 0; j < 4; j++) {
+        SI[i * 4 + j] = vb[o + 14 + j];
+        SW[i * 4 + j] = vb[o + 18 + j] / 255;
+      }
+    }
+    const ib = u8(g.i), geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(P, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(U, 2));
+    geo.setAttribute('skinIndex', new THREE.BufferAttribute(SI, 4));
+    geo.setAttribute('skinWeight', new THREE.BufferAttribute(SW, 4));
+    geo.setIndex(new THREE.BufferAttribute(new Uint16Array(ib.buffer, 0, g.nt * 3), 1));
+    const m = new THREE.SkinnedMesh(geo, new THREE.MeshStandardMaterial({
+      map: zTex,
+      roughness: 0.9,
+      side: THREE.DoubleSide
+    }));
+    m.frustumCulled = false;
+    grp.add(m);
+    m.bind(sk, new THREE.Matrix4());
+  }
+  outline(grp, 0.012);
+  const o = new THREE.Group();
+  grp.scale.setScalar(1.7);
+  o.add(grp);
+  o.userData.bn = n => B.find(b => b.name === n);
+  return o;
+}
+// ---------- procedural small monsters (slime, skeleton, dragon) ----------
+const bx = (w, h, d, c, x, y, z, p) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), std(c));
+  m.position.set(x, y, z);
+  (p || null) && p.add(m);
+  return m;
+};
+function mkSlime() {
+  const g = new THREE.Group(), b = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 12), std(5628016, {
+      flatShading: false,
+      roughness: 0.3
+    }));
+  b.position.y = 0.55;
+  g.add(b);
+  bx(0.12, 0.12, 0.05, 1060880, -0.22, 0.7, 0.62, g);
+  bx(0.12, 0.12, 0.05, 1060880, 0.22, 0.7, 0.62, g);
+  g.userData.body = b;
+  outline(g, 0.03);
+  return g;
+}
+function mkSkel() {
+  const g = new THREE.Group(), c = 15328466, L = {};
+  L.torso = bx(0.5, 0.7, 0.25, c, 0, 1.2, 0, g);
+  const sk = new THREE.Mesh(new THREE.SphereGeometry(0.28, 10, 8), std(c));
+  sk.position.y = 1.8;
+  g.add(sk);
+  bx(0.1, 0.1, 0.05, 1118481, -0.1, 1.84, 0.24, g);
+  bx(0.1, 0.1, 0.05, 1118481, 0.1, 1.84, 0.24, g);
+  for (const [n, x, y] of [
+      [
+        'aL',
+        -0.42,
+        1.45
+      ],
+      [
+        'aR',
+        0.42,
+        1.45
+      ],
+      [
+        'lL',
+        -0.17,
+        0.85
+      ],
+      [
+        'lR',
+        0.17,
+        0.85
+      ]
+    ]) {
+    const p = new THREE.Group();
+    p.position.set(x, y, 0);
+    bx(0.14, 0.7, 0.14, c, 0, -0.3, 0, p);
+    g.add(p);
+    L[n] = p;
+  }
+  g.userData.L = L;
+  outline(g, 0.03);
+  return g;
+}
+function mkBat() {
+  const g = new THREE.Group();
+  bx(0.5, 0.4, 0.5, 3351108, 0, 0, 0, g);
+  g.userData.W = [
+    -1,
+    1
+  ].map(s => {
+    const p = new THREE.Group();
+    p.position.set(s * 0.25, 0.1, 0);
+    bx(0.9, 0.04, 0.5, 2232627, s * 0.45, 0, 0, p);
+    g.add(p);
+    return p;
+  });
+  outline(g, 0.03);
+  return g;
+}
+function mkDragon() {
+  const g = new THREE.Group(), c = 12597547;
+  bx(0.9, 0.7, 1.5, c, 0, 0, 0, g);
+  bx(0.35, 0.35, 0.9, c, 0, 0.3, 0.95, g).rotation.x = -0.4;
+  bx(0.5, 0.45, 0.7, 14703162, 0, 0.62, 1.55, g);
+  bx(0.25, 0.25, 1.2, c, 0, -0.1, -1.2, g).rotation.x = 0.25;
+  g.userData.W = [
+    -1,
+    1
+  ].map(s => {
+    const p = new THREE.Group();
+    p.position.set(s * 0.45, 0.3, 0.1);
+    const w = bx(1.9, 0.06, 1.1, 8003350, s * 0.95, 0, 0, p);
+    g.add(p);
+    return p;
+  });
+  outline(g, 0.03);
+  return g;
+}
+// ---------- Quaternius monster pack (FBX, animated) ----------
+const fbxLoader = new FBXLoader(), MON = {};
+const loadFbx = u => new Promise(r => fbxLoader.load('assets/monsters/' + u, o => r(o), undefined, () => r(null)));
+const MON_H = {
+  dragon: 2.4,
+  slime: 1.3,
+  skel: 2.1,
+  bat: 1.1
+};
+function pickClip(clips, re) {
+  return clips.find(c => re.test(c.name)) || null;
+}
+function buildMonster(kind) {
+  const src = MON[kind];
+  if (!src)
+    return null;
+  const inner = SU.clone(src);
+  inner.animations = src.animations;
+  const b = new THREE.Box3().setFromObject(inner), s = MON_H[kind] / Math.max(0.001, b.max.y - b.min.y);
+  inner.scale.multiplyScalar(s);
+  const b2 = new THREE.Box3().setFromObject(inner);
+  inner.position.y -= b2.min.y;
+  inner.traverse(m => {
+    if (m.isMesh)
+      m.frustumCulled = false;
+  });
+  const root = new THREE.Group();
+  root.add(inner);
+  outline(root, 0.012);
+  const mix = new THREE.AnimationMixer(inner), cl = src.animations, res = {
+      mix,
+      acts: {}
+    };
+  const want = {
+    base: /idle|fly|run|walk/i,
+    fly: /fly/i,
+    run: /run|walk/i,
+    idle: /idle/i,
+    attack: /attack/i,
+    hit: /hit/i
+  };
+  for (const k in want) {
+    const c = pickClip(cl, want[k]);
+    if (c)
+      res.acts[k] = mix.clipAction(c);
+  }
+  const base = kind === 'dragon' || kind === 'bat' ? res.acts.fly || res.acts.base : kind === 'skel' ? res.acts.run || res.acts.idle : res.acts.idle || res.acts.base || mix.clipAction(cl[0]);
+  if (base) {
+    base.play();
+    res.base = base;
+  }
+  if (res.acts.attack) {
+    res.acts.attack.setLoop(THREE.LoopOnce, 1);
+    res.acts.attack.clampWhenFinished = false;
+  }
+  mix.addEventListener('finished', () => {
+    if (res.base) {
+      res.base.reset().play();
+    }
+  });
+  root.userData.res = res;
+  return root;
+}
+function playAttack(e) {
+  const r = e.obj.userData.res;
+  if (!r || !r.acts.attack || e.playing > 0)
+    return;
+  e.playing = 0.7;
+  r.acts.attack.reset().play();
+}
+// ---------- entities ----------
+function addEnt(o) {
+  scene.add(o.obj);
+  o.vx = o.vy = o.vz = 0;
+  o.cd = 0;
+  o.t = R(0, 9);
+  o.maxhp = o.hp;
+  ents.push(o);
+  return o;
+}
+function fit(o, h) {
+  const b = new THREE.Box3().setFromObject(o), s = h / (b.max.y - b.min.y);
+  o.scale.multiplyScalar(s);
+  const b2 = new THREE.Box3().setFromObject(o);
+  o.position.y -= b2.min.y;
+}
+function split(e, dir) {
+  const sc = e.obj.scale.x;
+  if (sc < 0.3 && e.kind === 'piece') {
+    return;
+  }
+  for (const s of [
+      -1,
+      1
+    ]) {
+    const c = SU.clone(e.obj);
+    c.scale.multiplyScalar(0.62);
+    c.position.copy(e.obj.position);
+    c.position.x += s * 0.35 * Math.cos(dir);
+    c.position.z += s * 0.35 * Math.sin(dir) * 0 + s * 0.1;
+    scene.add(c);
+    const p = {
+      kind: 'piece',
+      obj: c,
+      r: Math.max(0.25, e.r * 0.6),
+      hp: 14,
+      vx: s * R(1.5, 3) + e.vx,
+      vy: R(2, 4),
+      vz: R(-1, 1),
+      cd: 0,
+      life: 25,
+      solid: 1,
+      maxhp: 14,
+      t: 0
+    };
+    ents.push(p);
+  }
+}
+const kills = {
+  tomb: e => {
+    const x = e.obj.position.x, z = e.obj.position.z;
+    hole(x, z);
+    setTimeout(() => spawnZombie(x, z), 500);
+  },
+  zombie: e => {
+    const {x, z} = e.obj.position;
+    [
+      mkSlime,
+      mkSkel,
+      mkDragon,
+      mkBat
+    ].forEach((f, i) => spawnMon(f, [
+      'slime',
+      'skel',
+      'dragon',
+      'bat'
+    ][i], x + (i - 1.5) * 1.4, z + R(-0.8, 0.8)));
+  }
+};
+function kill(e, dir) {
+  scene.remove(e.obj);
+  ents.splice(ents.indexOf(e), 1);
+  if (e.kind === 'grassy')
+    return;
+  split(e, dir);
+  kills[e.kind] && kills[e.kind](e);
+  if (e.kind === 'rock') {
+  }
+}
+function damage(e, d, dir) {
+  if (e.dead || e.cd > 0 && d > 3)
+    return;
+  e.hp -= d;
+  e.cd = 0.25;
+  e.flash = 0.12;
+  e.obj.traverse(o => {
+    if (o.isMesh && o.material.emissive && !o.userData.hull) {
+      o.material.emissive.setHex(8925986);
+    }
+  });
+  setTimeout(() => e.obj.traverse(o => {
+    if (o.isMesh && o.material.emissive)
+      o.material.emissive.setHex(0);
+  }), 90);
+  const k = new THREE.Vector3(e.obj.position.x - ptr.x, 0, e.obj.position.z - ptr.z).setLength(2);
+  e.vx += k.x;
+  e.vz += k.z;
+  if (e.hp <= 0) {
+    e.dead = 1;
+    kill(e, dir);
+  }
+}
+function spawnZombie(x, z) {
+  const o = buildZombie();
+  o.position.set(x, -2.3, z);
+  const e = addEnt({
+    kind: 'zombie',
+    obj: o,
+    r: 0.9,
+    hp: 60,
+    rise: 0,
+    atk: 0
+  });
+  e.fly = 0;
+}
+function spawnMon(f, kind, x, z) {
+  const o = buildMonster(kind) || f();
+  o.position.set(x, kind === 'dragon' ? 2.5 : kind === 'bat' ? 2 : 0, z);
+  addEnt({
+    kind,
+    obj: o,
+    r: kind === 'dragon' ? 1 : kind === 'bat' ? 0.6 : 0.7,
+    hp: kind === 'dragon' ? 34 : kind === 'bat' ? 18 : 26,
+    atk: R(1, 3),
+    fly: kind === 'dragon' || kind === 'bat',
+    playing: 0
+  });
+}
+// ---------- monster behaviour (weak, unique attacks) ----------
+const tmpV = new THREE.Vector3();
+function updateMonster(e, dt, tgt) {
+  const o = e.obj, p = o.position, dx = tgt.x - p.x, dz = tgt.z - p.z, dd = Math.hypot(dx, dz) || 0.001, res = o.userData.res;
+  if (res)
+    res.mix.update(dt);
+  if (e.playing > 0)
+    e.playing -= dt;
+  e.atk -= dt;
+  o.rotation.y = Math.atan2(dx, dz);
+  if (e.kind === 'slime') {
+    const ph = e.t * 2.2 % 1, hop = Math.sin(ph * Math.PI);
+    if (!res) {
+      p.y = hop * 0.9;
+      o.userData.body.scale.set(1 + (1 - hop) * 0.18, 1 - (1 - hop) * 0.28 + hop * 0.12, 1 + (1 - hop) * 0.18);
+    } else
+      p.y = hop * 0.6;
+    if (hop > 0.05 && dd > 0.8) {
+      p.x += dx / dd * 1.4 * dt;
+      p.z += dz / dd * 1.4 * dt;
+    }
+    if (dd < 1.3 && e.cd <= 0 && ph < 0.15) {
+      dur -= 1;
+      e.cd = 1.2;
+      playAttack(e);
+      hud.textContent = 'Sword durability ' + dur + ' (slime bump)';
+    }
+  } else if (e.kind === 'skel') {
+    if (!res) {
+      const L = o.userData.L, rt = Math.sin(e.t * 40) * 0.12;
+      L.aL.rotation.x = rt * 2;
+      L.aR.rotation.x = -rt * 2;
+      L.lL.rotation.x = rt;
+      L.lR.rotation.x = -rt;
+      o.rotation.z = Math.sin(e.t * 35) * 0.04;
+    }
+    if (dd > 4) {
+      p.x += dx / dd * 0.9 * dt;
+      p.z += dz / dd * 0.9 * dt;
+    }
+    if (e.atk <= 0 && dd < 9) {
+      e.atk = 2.6;
+      playAttack(e);
+      const b = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 0.1), std(15328466));
+      b.position.set(p.x, 1.4, p.z);
+      scene.add(b);
+      projs.push({
+        m: b,
+        v: new THREE.Vector3(dx, 0, dz).normalize().multiplyScalar(5),
+        life: 2.5,
+        spin: 1
+      });
+    }
+  } else if (e.kind === 'dragon') {
+    if (!res) {
+      const W = o.userData.W, fl = Math.sin(e.t * 11) * 0.7;
+      W[0].rotation.z = fl;
+      W[1].rotation.z = -fl;
+    }
+    const a = e.t * 0.5 + e.atk * 0;
+    p.x += (Math.cos(e.t * 0.5) * 4 + tgt.x * 0.5 - p.x) * dt * 0.6;
+    p.z += (Math.sin(e.t * 0.5) * 3 + tgt.z * 0.5 - p.z) * dt * 0.6;
+    p.y = 3 + Math.sin(e.t * 1.3) * 1.4;
+    o.rotation.x = Math.cos(e.t * 1.3) * 0.15;
+    if (e.atk <= 0) {
+      e.atk = 3;
+      playAttack(e);
+      const f = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), new THREE.MeshBasicMaterial({ color: 16742938 }));
+      f.position.copy(p);
+      f.position.y += 0.4;
+      scene.add(f);
+      projs.push({
+        m: f,
+        v: tmpV.set(tgt.x, 0.8, tgt.z).sub(f.position).setLength(4.5).clone(),
+        life: 3
+      });
+    }
+  } else if (e.kind === 'bat') {
+    if (!res) {
+      const W = o.userData.W, fl = Math.sin(e.t * 18) * 0.8;
+      W[0].rotation.z = fl;
+      W[1].rotation.z = -fl;
+    }
+    const r = 2.5 + Math.sin(e.t * 0.7);
+    p.x += (tgt.x + Math.cos(e.t * 1.6) * r - p.x) * dt * 1.2;
+    p.z += (tgt.z + Math.sin(e.t * 1.6) * r - p.z) * dt * 1.2;
+    p.y = 1.6 + Math.sin(e.t * 3) * 0.7;
+    if (Math.hypot(p.x - tgt.x, p.z - tgt.z) < 1.3 && e.cd <= 0) {
+      dur -= 1;
+      e.cd = 1.5;
+      playAttack(e);
+      hud.textContent = 'Sword durability ' + dur + ' (bat nip)';
+    }
+  }
+}
+// ---------- stab: leaves a bare patch with no grass ----------
+function stab() {
+  if (stabCd > 0)
+    return;
+  stabCd = 0.55;
+  const x = ptr.x, z = ptr.z;
+  const p = new THREE.Mesh(new THREE.CircleGeometry(0.85, 20), new THREE.MeshBasicMaterial({
+    color: 8018488,
+    transparent: true
+  }));
+  p.rotation.x = -Math.PI / 2;
+  p.position.set(x, 0.025, z);
+  scene.add(p);
+  patches.push({
+    m: p,
+    t: 0
+  });
+  for (const g of grass)
+    if (!g.cut && Math.hypot(g.o.position.x - x, g.o.position.z - z) < 0.85)
+      g.cut = 0.01;
+  for (const e of ents.slice())
+    if (e.obj.position.distanceTo(new THREE.Vector3(x, e.obj.position.y, z)) < e.r + 0.7 && !(e.kind === 'piece' && 0))
+      damage(e, 24, 0);
+  stabAnim = 0.35;
+}
+let stabAnim = 0;
+// ---------- leaf cutting (regrows slowly) ----------
+const trees = [];
+function prepTree(t) {
+  let leaves = null;
+  t.traverse(o => {
+    if (o.isMesh && /Leav/i.test(o.material.name))
+      leaves = o;
+  });
+  if (!leaves)
+    return;
+  leaves.geometry = leaves.geometry.clone();
+  leaves.material = leaves.material.clone();
+  const g = leaves.geometry, pos = g.attributes.position, n = pos.count, orig = pos.array.slice(), card = new Int32Array(n);
+  t.updateMatrixWorld(true);
+  const cen = [], cw = [], v = new THREE.Vector3();
+  const ncard = Math.ceil(n / 4);
+  for (let c = 0; c < ncard; c++) {
+    const s = new THREE.Vector3();
+    let k = 0;
+    for (let i = c * 4; i < Math.min(n, c * 4 + 4); i++) {
+      s.add(v.fromBufferAttribute(pos, i));
+      k++;
+    }
+    s.divideScalar(k);
+    cen.push(s);
+    cw.push(s.clone().applyMatrix4(leaves.matrixWorld));
+  }
+  trees.push({
+    leaves,
+    orig,
+    cen,
+    cw,
+    k: new Float32Array(ncard).fill(1),
+    n,
+    g
+  });
+}
+function cutLeaves(c, rad) {
+  for (const t of trees)
+    for (let i = 0; i < t.cw.length; i++)
+      if (t.cw[i].distanceTo(c) < rad)
+        t.k[i] = 0;
+}
+function growLeaves(dt) {
+  for (const t of trees) {
+    let ch = 0;
+    const pos = t.g.attributes.position;
+    for (let c = 0; c < t.k.length; c++) {
+      if (t.k[c] < 1) {
+        t.k[c] = Math.min(1, t.k[c] + dt * 0.035);
+        ch = 1;
+        for (let i = c * 4; i < Math.min(t.n, c * 4 + 4); i++) {
+          for (let a = 0; a < 3; a++) {
+            const ce = t.cen[c].getComponent(a);
+            pos.array[i * 3 + a] = ce + (t.orig[i * 3 + a] - ce) * t.k[c];
+          }
+        }
+      }
+    }
+    if (ch)
+      pos.needsUpdate = true;
+  }
+}
+// ---------- build the scene ----------
+(async () => {
+  hud.textContent = 'Loading models\u2026';
+  const mons = await Promise.all([
+    'Dragon',
+    'Slime',
+    'Skeleton',
+    'Bat'
+  ].map(n => loadFbx(n + '.fbx')));
+  [MON.dragon, MON.slime, MON.skel, MON.bat] = mons;
+  const [t1, t2, gr, pr, ps, s1, s2, s3] = await Promise.all([
+    'CommonTree_1.gltf',
+    'CommonTree_2.gltf',
+    'Grass_Common_Tall.gltf',
+    'Pebble_Round_1.gltf',
+    'Pebble_Square_1.gltf',
+    'Tombstone_1.glb',
+    'Tombstone_2.glb',
+    'Tombstone_3.glb'
+  ].map(load));
+  [
+    [
+      t1,
+      -9,
+      -3
+    ],
+    [
+      t2,
+      9,
+      -4
+    ],
+    [
+      t2,
+      -12,
+      3
+    ],
+    [
+      t1,
+      12,
+      2
+    ]
+  ].forEach(([m, x, z]) => {
+    if (!m)
+      return;
+    const t = m.clone(true);
+    t.position.set(x, 0, z);
+    fit(t, 7);
+    outline(t, 0.012);
+    scene.add(t);
+    t.updateMatrixWorld(true);
+    prepTree(t);
+    addEnt({
+      kind: 'tree',
+      obj: t,
+      r: 0.8,
+      hp: 1000000000,
+      static: 1
+    });
+  });
+  [
+    [
+      s1,
+      -2.5,
+      -1
+    ],
+    [
+      s2,
+      3,
+      -2
+    ],
+    [
+      s3,
+      0,
+      1.5
+    ]
+  ].forEach(([m, x, z], i) => {
+    if (!m)
+      return;
+    const t = m.clone(true);
+    t.position.set(x, 0, z);
+    fit(t, 2.1);
+    outline(t, 0.012);
+    addEnt({
+      kind: 'tomb',
+      obj: t,
+      r: 0.9,
+      hp: 70
+    });
+  });
+  [
+    [
+      pr,
+      -10.5,
+      6,
+      2.2
+    ],
+    [
+      ps,
+      10.5,
+      6,
+      2.4
+    ],
+    [
+      pr,
+      -7,
+      6.5,
+      1.2
+    ],
+    [
+      ps,
+      7.5,
+      6.8,
+      1.1
+    ]
+  ].forEach(([m, x, z, s]) => {
+    if (!m)
+      return;
+    const r = m.clone(true);
+    r.position.set(x, 0, z);
+    fit(r, s);
+    outline(r, 0.012);
+    addEnt({
+      kind: 'rock',
+      obj: r,
+      r: s * 0.6,
+      hp: s * 20
+    });
+  });
+  for (let i = 0; i < 160 && gr; i++) {
+    const o = gr.clone(true);
+    o.position.set(R(-14, 14), 0, R(-6, 8));
+    o.rotation.y = R(0, 6.3);
+    fit(o, R(0.9, 1.7));
+    o.traverse(m => {
+      if (m.isMesh) {
+        m.material = m.material.clone();
+        m.material.transparent = true;
+        m.material.side = THREE.DoubleSide;
+      }
+    });
+    scene.add(o);
+    grass.push({
+      o,
+      cut: 0,
+      regrow: 0,
+      h: o.scale.x
+    });
+  }
+  hud.textContent = 'Move = sword \xB7 swing fast to cut \xB7 click = stab \xB7 hold on a rock to drag \xB7 wheel = sword height';
+  let last = performance.now();
+  (function loop(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    requestAnimationFrame(loop);
+    const T = now / 1000;
+    pPrev.copy(ptr);
+    updPtr();
+    const sp = ptr.distanceTo(pPrev) / Math.max(dt, 0.001);
+    stabCd -= dt;
+    // sword hangs from the cursor and swings with its motion
+    const vx = (ptr.x - pPrev.x) / Math.max(dt, 0.001), vz = (ptr.z - pPrev.z) / Math.max(dt, 0.001);
+    sword.position.set(ptr.x, stabAnim > 0 ? 0.15 : height, ptr.z);
+    swordTilt.rotation.z += (-vx * 0.06 - swordTilt.rotation.z) * Math.min(1, dt * 10);
+    swordTilt.rotation.x += (vz * 0.06 - swordTilt.rotation.x) * Math.min(1, dt * 10);
+    swordTilt.rotation.x = THREE.MathUtils.clamp(swordTilt.rotation.x, -1.3, 1.3);
+    swordTilt.rotation.z = THREE.MathUtils.clamp(swordTilt.rotation.z, -1.3, 1.3);
+    if (stabAnim > 0) {
+      stabAnim -= dt;
+      swordTilt.rotation.set(Math.PI, 0, 0);
+    }
+    const sc = new THREE.Vector3(ptr.x, height + 0.9, ptr.z);
+    if (sp > 6 && !down) {
+      const d = Math.min(40, sp * 1.4), dir = Math.atan2(vz, vx);
+      for (const e of ents.slice()) {
+        if (e.static || e.dead)
+          continue;
+        const dx = e.obj.position.x - ptr.x, dz = e.obj.position.z - ptr.z;
+        if (Math.hypot(dx, dz) < e.r + 0.9 && Math.abs(e.obj.position.y + e.r - height) < e.r + 2.2)
+          damage(e, d, dir);
+      }
+      for (const g of grass)
+        if (!g.cut && Math.hypot(g.o.position.x - ptr.x, g.o.position.z - ptr.z) < 0.9 && height < 2.6)
+          g.cut = 0.01;
+      cutLeaves(sc, 1.7);
+    }
+    if (dragEnt) {
+      dragEnt.obj.position.x += (ptr.x - dragEnt.obj.position.x) * 0.4;
+      dragEnt.obj.position.z += (ptr.z - dragEnt.obj.position.z) * 0.4;
+      dragEnt.obj.position.y = Math.max(dragEnt.obj.position.y, 0.3);
+      dragEnt.vy = 0;
+    }
+    const tgt = new THREE.Vector3(ptr.x, 0, ptr.z);
+    for (const e of ents.slice()) {
+      if (e.static)
+        continue;
+      const o = e.obj;
+      e.t += dt;
+      e.cd -= dt;
+      if (e.kind === 'zombie') {
+        e.rise = Math.min(1, e.rise + dt / 2.2);
+        o.position.y = -2.3 * (1 - e.rise);
+        if (e.rise >= 1) {
+          const dx = tgt.x - o.position.x, dz = tgt.z - o.position.z, dd = Math.hypot(dx, dz);
+          o.rotation.y = Math.atan2(dx, dz);
+          if (dd > 1.7) {
+            o.position.x += dx / dd * 0.9 * dt;
+            o.position.z += dz / dd * 0.9 * dt;
+          }
+          e.atk -= dt;
+          if (dd < 2.4 && e.atk <= 0) {
+            e.atk = 1.4;
+            e.lunge = 0.4;
+            dur -= 2;
+            hud.textContent = 'Sword durability ' + dur + ' (zombie scratched it)';
+          }
+        }
+        const b = o.userData.bn, sw = Math.sin(e.t * 5) * 0.5 * (e.rise >= 1);
+        const g = n => b(n);
+        g('thigh.L').rotation.x = sw;
+        g('thigh.R').rotation.x = -sw;
+        g('upper_arm.L').rotation.y = -1.25 - (e.lunge > 0 ? 0.3 : 0);
+        g('upper_arm.R').rotation.y = 1.25 + (e.lunge > 0 ? 0.3 : 0);
+        g('spine.001').rotation.z = Math.sin(e.t * 2) * 0.08;
+        g('jaw').rotation.x = 0.2 + Math.sin(e.t * 6) * 0.15;
+        if (e.lunge > 0)
+          e.lunge -= dt;
+      } else if (e.kind === 'slime' || e.kind === 'skel' || e.kind === 'dragon' || e.kind === 'bat') {
+        updateMonster(e, dt, tgt);
+      } else if (e.kind === 'piece' || e.kind === 'rock' || e.kind === 'tomb') {
+      }
+      if (e.kind === 'piece' || e.kind === 'rock') {
+        if (e !== dragEnt) {
+          e.vy -= 14 * dt;
+          o.position.x += e.vx * dt;
+          o.position.y += e.vy * dt;
+          o.position.z += e.vz * dt;
+          const fl = 0;
+          if (o.position.y < fl) {
+            o.position.y = fl;
+            e.vy *= -0.3;
+            e.vx *= 0.7;
+            e.vz *= 0.7;
+            if (Math.abs(e.vy) < 0.6)
+              e.vy = 0;
+          }
+        }
+        const spd = Math.hypot(e.vx, e.vy, e.vz);
+        if (spd > 2.5)
+          for (const q of ents)
+            if (q !== e && !q.static && q.kind !== 'piece' && Math.hypot(q.obj.position.x - o.position.x, q.obj.position.z - o.position.z) < q.r + e.r && Math.abs(q.obj.position.y - o.position.y) < 2 && !(q.cd > 0)) {
+              q.cd = 0.4;
+              q.hp -= 0.5;
+              if (q.hp <= 0 && !q.dead) {
+                q.dead = 1;
+                kill(q, 0);
+              }
+            }
+        if (e.life !== undefined) {
+          e.life -= dt;
+          if (e.life < 2)
+            o.scale.multiplyScalar(1 - dt * 0.4);
+          if (e.life <= 0) {
+            scene.remove(o);
+            ents.splice(ents.indexOf(e), 1);
+          }
+        }
+      } else if (e.kind !== 'dragon' && e.kind !== 'tree') {
+        e.vx *= 0.9;
+        e.vz *= 0.9;
+        o.position.x += e.vx * dt;
+        o.position.z += e.vz * dt;
+      }
+    }
+    for (let i = projs.length - 1; i >= 0; i--) {
+      const p = projs[i];
+      p.m.position.addScaledVector(p.v, dt);
+      if (p.spin)
+        p.m.rotation.y += dt * 12;
+      p.life -= dt;
+      if (p.m.position.distanceTo(new THREE.Vector3(ptr.x, height, ptr.z)) < 0.8) {
+        dur -= 1;
+        hud.textContent = 'Sword durability ' + dur + ' (hit by a weak projectile)';
+        p.life = 0;
+      }
+      if (p.life <= 0) {
+        scene.remove(p.m);
+        projs.splice(i, 1);
+      }
+    }
+    // long grass: fades out (more and more transparent) then despawns, regrows later
+    for (const g of grass) {
+      if (g.cut > 0) {
+        g.cut += dt;
+        g.o.traverse(m => {
+          if (m.isMesh)
+            m.material.opacity = Math.max(0, 1 - g.cut / 1.2);
+        });
+        if (g.cut > 1.2) {
+          g.o.visible = false;
+          g.regrow = 14;
+          g.cut = -1;
+        }
+      } else if (g.cut < 0) {
+        g.regrow -= dt;
+        if (g.regrow <= 0) {
+          const ok = !patches.some(p => !p.hole && p.m.position.distanceTo(g.o.position) < 0.85);
+          if (ok) {
+            g.o.visible = true;
+            g.cut = 0;
+            g.o.traverse(m => {
+              if (m.isMesh)
+                m.material.opacity = 1;
+            });
+          } else
+            g.regrow = 4;
+        }
+      }
+    }
+    for (let i = patches.length - 1; i >= 0; i--) {
+      const p = patches[i];
+      p.t += dt;
+      if (p.hole) {
+        p.m.scale.setScalar(Math.min(1, p.t / 0.5) + 0.01);
+        if (p.t > 30) {
+          p.m.material.opacity = 1;
+          scene.remove(p.m);
+          patches.splice(i, 1);
+        }
+      } else if (p.t > 40) {
+        scene.remove(p.m);
+        patches.splice(i, 1);
+      }
+    }
+    growLeaves(dt);
+    renderer.render(scene, cam);
+  }(last));
+})();
 </script></body></html>

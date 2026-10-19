@@ -1,4 +1,5 @@
-# Arming Sword Graveyard
-Open `index.html`, or host it on GitHub Pages: push these files to a repo, then Settings > Pages > Deploy from branch (main, / root).
-Swing the mouse fast to cut. Hold the mouse on a rock to drag it (thrown rocks do low damage). Cut the tombstone and a zombie crawls out of a hole and attacks your sword.
-Not cuttable: text, the textbox, the grass base.
+# Arming Sword Graveyard 3D
+Keep `index.html`, `assets/` and `downloads/` together. Push all three to a GitHub repo, then Settings > Pages > Deploy from branch (main, / root).
+Needs internet (three.js loads from jsDelivr). To test locally run `python3 -m http.server` in this folder and open http://localhost:8000
+Controls: move = sword, swing fast = cut, click = stab, hold on a rock = drag, mouse wheel = sword height.
+Install the extension: unzip downloads/gun-smash-extension.zip, open chrome://extensions, enable Developer mode, Load unpacked.
